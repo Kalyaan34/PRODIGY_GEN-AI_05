@@ -1,0 +1,126 @@
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras.applications import vgg19
+import numpy as np
+import matplotlib.pyplot as plt
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torchvision import models, transforms
+from PIL import Image
+import matplotlib.pyplot as plt
+def load_and_preprocess_image(image_path):
+    img = keras.preprocessing.image.load_img(image_path, target_size=(256, 256))
+    img = keras.preprocessing.image.img_to_array(img)
+    img = np.expand_dims(img, axis=0)
+    img = vgg19.preprocess_input(img)  # Preprocess for VGG19
+    return img
+
+content_image = load_and_preprocess_image('path/to/content.jpg')
+style_image = load_and_preprocess_image('path/to/style.jpg')
+def load_image(image_path):
+    image = Image.open(image_path)
+    transform = transforms.Compose([
+        transforms.Resize((256, 256)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    return transform(image).unsqueeze(0)  # Add batch dimension
+
+content_image = load_image('path/to/content.jpg')
+style_image = load_image('path/to/style.jpg')
+model = vgg19.VGG19(weights='imagenet', include_top=False)
+# Define layers to extract content and style features
+content_layer = 'block5_conv2'
+style_layers = ['block1_conv1', 'block2_conv1', 'block3_conv1', 'block4_conv1', 'block5_conv1']
+cnn = models.vgg19(pretrained=True).features.eval()  # Load VGG19 model
+# Define layers for content and style loss calculations
+content_layers = ['21']  # VGG layer index for content
+style_layers = ['0', '5', '10', '19', '28']  # VGG layer indices for style
+def get_content_loss(content, generated):
+    return tf.reduce_mean(tf.square(content - generated))
+
+def get_style_loss(style, generated):
+    S = gram_matrix(style)
+    G = gram_matrix(generated)
+    return tf.reduce_mean(tf.square(S - G))
+
+def gram_matrix(tensor):
+    batch_size, height, width, channels = tensor.shape
+    features = tf.reshape(tensor, (batch_size, height * width, channels))
+    gram = tf.matmul(features, features, transpose_b=True)
+    return gram / tf.cast(height * width * channels, tf.float32)
+class ContentLoss(nn.Module):
+    def __init__(self, target):
+        super(ContentLoss, self).__init__()
+        self.target = target.detach()  # Detach to avoid gradients
+
+    def forward(self, x):
+        return nn.functional.mse_loss(x, self.target)
+
+class StyleLoss(nn.Module):
+    def __init__(self, target):
+        super(StyleLoss, self).__init__()
+        self.target_gram = gram_matrix(target.detach())
+
+    def forward(self, x):
+        G = gram_matrix(x)
+        return nn.functional.mse_loss(G, self.target_gram)
+
+def gram_matrix(tensor):
+    b, c, h, w = tensor.size()
+    features = tensor.view(b, c, h * w)
+    G = torch.bmm(features, features.transpose(1, 2))
+    return G.div(c * h * w)
+generated_image = tf.Variable(content_image)
+
+optimizer = tf.optimizers.Adam(learning_rate=0.02)
+
+for i in range(num_iterations):
+    with tf.GradientTape() as tape:
+        # Extract features from content and style images using model
+        generated_features = model(generated_image)
+        content_loss_value = get_content_loss(content_features[content_layer], generated_features[content_layer])
+        style_loss_value = sum(get_style_loss(style_features[layer], generated_features[layer]) for layer in style_layers)
+        
+        total_loss = content_weight * content_loss_value + style_weight * style_loss_value
+        
+    grads = tape.gradient(total_loss, generated_image)
+    optimizer.apply_gradients([(grads, generated_image)])
+    input_img = content_image.clone().requires_grad_(True)  # Clone content image for optimization
+
+optimizer = optim.LBFGS([input_img])  # Use L-BFGS optimizer
+
+for i in range(num_iterations):
+    def closure():
+        optimizer.zero_grad()
+        
+        output_img = cnn(input_img)
+        
+        content_loss_value = content_loss(output_img[content_layer])
+        style_loss_value = sum(style_loss(output_img[layer]) for layer in style_layers)
+        
+        total_loss = alpha * content_loss_value + beta * style_loss_value
+        
+        total_loss.backward()
+        
+        return total_loss
+    
+    optimizer.step(closure)
+    final_image = generated_image.numpy()
+final_image = np.squeeze(final_image)  # Remove batch dimension
+
+plt.imshow(final_image.astype('uint8'))
+plt.axis('off')
+plt.show()
+# Detach the input image for further processing if needed
+output_img = input_img.clone().detach()
+# Convert back to PIL Image for visualization
+output_img = transforms.ToPILImage()(output_img.cpu())
+
+
+# Convert back to PIL Image for visualization
+output_img = transforms.ToPILImage()(output_img.cpu())
+plt.imshow(output_img)
+plt.axis('off')
+plt.show()
